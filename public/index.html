@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>M&amp;M — Message</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💬</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="auth" class="screen">
+  <div class="card">
+    <div class="brand">
+      <div class="logo">M&amp;M</div>
+      <div class="tag">Message</div>
+    </div>
+    <div class="tabs">
+      <button class="tab on" data-t="login">دخول</button>
+      <button class="tab" data-t="signup">حساب جديد</button>
+    </div>
+    <input id="nm" placeholder="الاسم" autocomplete="username" maxlength="24">
+    <input id="pw" type="password" placeholder="كلمة السر" autocomplete="current-password" maxlength="64">
+    <div class="err" id="err"></div>
+    <button class="p big" id="go">دخول</button>
+  </div>
+</div>
+
+<div id="app" class="screen" hidden>
+  <div class="side">
+    <div class="hd brandbar">
+      <div class="logo sm">M&amp;M</div>
+      <div class="tag sm">Message</div>
+      <button id="setBtn" class="icon" title="الإعدادات">⚙️</button>
+    </div>
+    <div class="hd me" id="meh"></div>
+    <div class="pagetabs">
+      <button class="ptab on" data-p="chats">الدردشات</button>
+      <button class="ptab" data-p="status">الحالات</button>
+    </div>
+
+    <div id="pane-chats" class="pane">
+      <div class="searchwrap"><input id="q" placeholder="ابحث عن شخص…"><button id="newChat" class="icon" title="محادثة جديدة">✏️</button></div>
+      <div class="list" id="list"></div>
+    </div>
+
+    <div id="pane-status" class="pane" hidden>
+      <div class="list" id="statusList"></div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div id="chh" class="hd" hidden>
+      <button class="back icon" id="bk">➜</button>
+      <div id="cav"></div>
+      <div class="t" id="cti"></div>
+      <button id="ca" class="icon" title="مكالمة صوتية">📞</button>
+      <button id="cv" class="icon" title="مكالمة فيديو">🎥</button>
+      <button id="wpBtn" class="icon" title="خلفية المحادثة">🖼️</button>
+    </div>
+    <div class="msgs" id="msgs"><div class="empty">اختر شخصاً من القائمة لبدء المحادثة</div></div>
+    <div class="emojipanel" id="emojiPanel" hidden>
+      <div class="emojitabs" id="emojiTabs"></div>
+      <div class="emojigrid" id="emojiGrid"></div>
+    </div>
+    <div class="cmp" id="cmp" hidden>
+      <button id="mic" class="icon" title="تسجيل رسالة صوتية">🎙️</button>
+      <button id="emojiBtn" class="icon" title="إيموجي">😊</button>
+      <textarea id="tx" rows="1" placeholder="اكتب رسالة…"></textarea>
+      <button class="p" id="sd">إرسال</button>
+    </div>
+  </div>
+</div>
+
+<div id="ring" class="ring" hidden>
+  <span id="rt"></span>
+  <button class="p" id="acb">رد</button>
+  <button id="rj">رفض</button>
+</div>
+
+<div class="ov" id="call" hidden>
+  <video id="rv" autoplay playsinline></video>
+  <video id="lv" autoplay playsinline muted></video>
+  <div id="cn"></div>
+  <div class="bar">
+    <button id="mu" class="round">🎤</button>
+    <button id="hg" class="round end">📵</button>
+  </div>
+</div>
+
+<div class="ov storyov" id="storyView" hidden>
+  <div class="storybars" id="storybars"></div>
+  <div class="storyhd">
+    <div id="storyav"></div>
+    <div class="t"><b id="storyname"></b><small id="storytime"></small></div>
+    <button class="icon" id="storyClose" style="color:#fff">✕</button>
+  </div>
+  <div class="storybody" id="storybody"></div>
+  <div class="storynav"><div id="storyPrev" class="half"></div><div id="storyNext" class="half"></div></div>
+  <button id="storyViewers" class="viewersbtn" hidden>👁 <span id="viewerCount">0</span> مشاهدة</button>
+</div>
+
+<dialog id="dlg"></dialog>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
