@@ -74,26 +74,87 @@ jobs:
           s = s.replace("io({ auth: { token } })", "io(API, { auth: { token } })")
           s = s.replace("socket.on('message:new', m => {",
                         "socket.on('message:new', m => {\n    try { window.__mmNotify && window.__mmNotify(m); } catch (e) {}", 1)
-          s += """
+          s = s.replace("pc.ontrack = e => { $('rv').srcObject = e.streams[0]; };",
+                        "pc.ontrack = e => { $('rv').srcObject = e.streams[0]; $('rv').play().catch(() => {}); };")
+          s += r"""
 
-          // ---- إشعارات أندرويد (مضافة تلقائيًا عند بناء الـ APK) ----
+          // ---- إشعارات وأصوات أندرويد (مضافة تلقائيًا عند بناء الـ APK) ----
           (function () {
-            const LN = () => window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications;
+            const cap = window.Capacitor;
+            const native = !!(cap && cap.isNativePlatform && cap.isNativePlatform());
+            let LN = null;
+            try { if (native) LN = cap.registerPlugin('LocalNotifications'); } catch (e) {}
+
+            let ctx = null;
+            function ac() {
+              try {
+                if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+                if (ctx.state === 'suspended') ctx.resume();
+              } catch (e) {}
+              return ctx;
+            }
+            function tone(freq, start, dur, vol) {
+              const c = ac(); if (!c) return;
+              const o = c.createOscillator(), g = c.createGain();
+              o.type = 'sine'; o.frequency.value = freq;
+              const t = c.currentTime + start;
+              g.gain.setValueAtTime(0.0001, t);
+              g.gain.exponentialRampToValueAtTime(vol, t + 0.03);
+              g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+              o.connect(g); g.connect(c.destination);
+              o.start(t); o.stop(t + dur + 0.05);
+            }
+            const ringIn = () => { tone(880, 0, .25, .5); tone(660, .3, .25, .5); tone(880, .8, .25, .5); tone(660, 1.1, .25, .5); };
+            const ringOut = () => tone(425, 0, 1, .25);
+            const beep = () => { tone(880, 0, .12, .35); tone(1175, .14, .18, .35); };
+
+            async function initNotif() {
+              ac();
+              if (!LN) return;
+              try { await LN.requestPermissions(); } catch (e) {}
+              try { await LN.createChannel({ id: 'messages', name: 'الرسائل', importance: 5, visibility: 1, vibration: true }); } catch (e) {}
+              try { await LN.createChannel({ id: 'calls', name: 'المكالمات', importance: 5, visibility: 1, vibration: true }); } catch (e) {}
+            }
+            function show(title, body, channelId) {
+              if (!LN) return;
+              LN.schedule({ notifications: [{ id: Math.floor(Math.random() * 2147483000), title, body, channelId }] }).catch(() => {});
+            }
+            ['touchstart', 'click'].forEach(ev => document.addEventListener(ev, function once() {
+              document.removeEventListener(ev, once); initNotif();
+            }, { passive: true }));
+            document.addEventListener('DOMContentLoaded', initNotif);
+
             window.__mmNotify = function (m) {
-              const ln = LN();
-              if (!ln || !me || m.from === me.id) return;
+              if (!me || m.from === me.id) return;
               if (!document.hidden && cur === m.from) return;
+              if (!document.hidden) beep();
               const u = users[m.from];
-              ln.schedule({ notifications: [{
-                id: Math.floor(Math.random() * 2147483000),
-                title: (u && u.name) || 'M&M',
-                body: m.type === 'v' ? '🎤 رسالة صوتية' : (m.text || 'رسالة جديدة')
-              }] }).catch(() => {});
+              show((u && u.name) || 'M&M', m.type === 'v' ? '🎤 رسالة صوتية' : (m.text || 'رسالة جديدة'), 'messages');
             };
-            document.addEventListener('DOMContentLoaded', () => {
-              const ln = LN();
-              if (ln) ln.requestPermissions().catch(() => {});
-            });
+
+            let mode = null, timer = null;
+            function setMode(m) {
+              if (m === mode) return;
+              mode = m; clearInterval(timer); timer = null;
+              if (!m) return;
+              const play = m === 'in'
+                ? () => { ringIn(); try { navigator.vibrate && navigator.vibrate([400, 200, 400]); } catch (e) {} }
+                : ringOut;
+              play(); timer = setInterval(play, m === 'in' ? 2200 : 4000);
+            }
+            setInterval(() => {
+              const ring = document.getElementById('ring');
+              const callEl = document.getElementById('call');
+              const cn = document.getElementById('cn');
+              if (ring && !ring.hidden) {
+                if (mode !== 'in' && document.hidden) show('📞 مكالمة واردة', (document.getElementById('rt') || {}).textContent || '', 'calls');
+                setMode('in');
+              } else if (callEl && !callEl.hidden && cn && cn.textContent.indexOf('جارٍ الاتصال بـ') === 0) {
+                setMode('out');
+              } else {
+                setMode(null);
+              }
+            }, 400);
           })();
           """
           open(p, 'w', encoding='utf-8').write(s)
@@ -105,6 +166,21 @@ jobs:
           assert needle in h, 'missing socket script'
           h = h.replace(needle, '<script src="socket.io.min.js"></script>')
           open(p, 'w', encoding='utf-8').write(h)
+
+          # ---- fix the giant default play icon on <video> in WebView ----
+          p = 'capapp/www/index.html'
+          h = open(p, encoding='utf-8').read()
+          POSTER = 'poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"'
+          for vid in ('<video id="rv" autoplay playsinline>', '<video id="lv" autoplay playsinline muted>'):
+              assert vid in h, 'missing ' + vid
+              h = h.replace(vid, vid[:-1] + ' ' + POSTER + '>')
+          open(p, 'w', encoding='utf-8').write(h)
+
+          # ---- full-height layout and clean video ----
+          p = 'capapp/www/style.css'
+          c = open(p, encoding='utf-8').read()
+          c += "\nhtml,body{height:100dvh}\n#rv,#lv{background:#000}\nvideo::-webkit-media-controls{display:none!important}\n"
+          open(p, 'w', encoding='utf-8').write(c)
           print('patched OK for', url)
           PY
           node -e "
@@ -113,9 +189,9 @@ jobs:
             appId: 'com.mm.message',
             appName: process.env.APP_NAME || 'MM Message',
             webDir: 'www',
-            backgroundColor: '#0f766e',
+            backgroundColor: '#0b0f14',
             server: { androidScheme: 'https', cleartext: url.startsWith('http://') },
-            android: { backgroundColor: '#0f766e' }
+            android: { backgroundColor: '#0b0f14' }
           };
           require('fs').writeFileSync('capapp/capacitor.config.json', JSON.stringify(cfg, null, 2));
           "
@@ -141,7 +217,7 @@ jobs:
           done
           sed -i '/<\/manifest>/i\    <uses-feature android:name="android.hardware.camera" android:required="false" />' $M
           S=android/app/src/main/res/values/styles.xml
-          sed -i 's#</style>#    <item name="android:statusBarColor">\#0f766e</item>\n        <item name="android:navigationBarColor">\#0f766e</item>\n    </style>#' $S
+          sed -i 's#</style>#    <item name="android:statusBarColor">\#0b0f14</item>\n        <item name="android:navigationBarColor">\#0b0f14</item>\n    </style>#' $S
           sed -i 's#android:windowSoftInputMode="[^"]*"##; s#<activity#<activity android:windowSoftInputMode="adjustResize"#' $M
           cat $M $S
 
