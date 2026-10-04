@@ -1,0 +1,157 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_url:
+        description: "رابط الخادم المنشور (مثال: https://xxx.up.railway.app)"
+        required: true
+        type: string
+      app_name:
+        description: "اسم التطبيق"
+        required: false
+        default: "MM Message"
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Bundle the web app into a Capacitor project
+        env:
+          SERVER_URL: ${{ github.event.inputs.server_url }}
+          APP_NAME: ${{ github.event.inputs.app_name }}
+        run: |
+          test -d public || { echo "مجلد public غير موجود في جذر المستودع"; exit 1; }
+          mkdir -p capapp/assets
+          cat > capapp/package.json <<'EOF'
+          {
+            "name": "mm-apk",
+            "version": "1.0.0",
+            "private": true,
+            "dependencies": {
+              "@capacitor/core": "^6.2.0",
+              "@capacitor/android": "^6.2.0",
+              "@capacitor/local-notifications": "^6.1.0",
+              "socket.io-client": "4.7.5"
+            },
+            "devDependencies": {
+              "@capacitor/cli": "^6.2.0",
+              "@capacitor/assets": "^3.0.5"
+            }
+          }
+          EOF
+          (cd capapp && npm install)
+          cp -r public capapp/www
+          cp capapp/node_modules/socket.io-client/dist/socket.io.min.js capapp/www/socket.io.min.js
+          python3 - <<'PY'
+          import os, json
+          url = os.environ['SERVER_URL'].strip().rstrip('/')
+
+          # ---- app.js ----
+          p = 'capapp/www/app.js'
+          s = open(p, encoding='utf-8').read()
+          for needle in ("const API = '';", "io({ auth: { token } })", "socket.on('message:new', m => {"):
+              assert needle in s, 'missing: ' + needle
+          s = s.replace("const API = '';", 'const API = ' + json.dumps(url) + ';')
+          s = s.replace("io({ auth: { token } })", "io(API, { auth: { token } })")
+          s = s.replace("socket.on('message:new', m => {",
+                        "socket.on('message:new', m => {\n    try { window.__mmNotify && window.__mmNotify(m); } catch (e) {}", 1)
+          s += """
+
+          // ---- إشعارات أندرويد (مضافة تلقائيًا عند بناء الـ APK) ----
+          (function () {
+            const LN = () => window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications;
+            window.__mmNotify = function (m) {
+              const ln = LN();
+              if (!ln || !me || m.from === me.id) return;
+              if (!document.hidden && cur === m.from) return;
+              const u = users[m.from];
+              ln.schedule({ notifications: [{
+                id: Math.floor(Math.random() * 2147483000),
+                title: (u && u.name) || 'M&M',
+                body: m.type === 'v' ? '🎤 رسالة صوتية' : (m.text || 'رسالة جديدة')
+              }] }).catch(() => {});
+            };
+            document.addEventListener('DOMContentLoaded', () => {
+              const ln = LN();
+              if (ln) ln.requestPermissions().catch(() => {});
+            });
+          })();
+          """
+          open(p, 'w', encoding='utf-8').write(s)
+
+          # ---- index.html ----
+          p = 'capapp/www/index.html'
+          h = open(p, encoding='utf-8').read()
+          needle = '<script src="/socket.io/socket.io.js"></script>'
+          assert needle in h, 'missing socket script'
+          h = h.replace(needle, '<script src="socket.io.min.js"></script>')
+          open(p, 'w', encoding='utf-8').write(h)
+          print('patched OK for', url)
+          PY
+          node -e "
+          const url = process.env.SERVER_URL.trim().replace(/\/+$/, '');
+          const cfg = {
+            appId: 'com.mm.message',
+            appName: process.env.APP_NAME || 'MM Message',
+            webDir: 'www',
+            backgroundColor: '#0f766e',
+            server: { androidScheme: 'https', cleartext: url.startsWith('http://') },
+            android: { backgroundColor: '#0f766e' }
+          };
+          require('fs').writeFileSync('capapp/capacitor.config.json', JSON.stringify(cfg, null, 2));
+          "
+          cd capapp
+          npx cap add android
+
+      - name: Generate icon and splash screen
+        continue-on-error: true
+        working-directory: capapp
+        run: |
+          IM=$(command -v magick || echo convert)
+          $IM -size 1024x1024 xc:'#0f766e' -gravity center -fill white -font DejaVu-Sans-Bold -pointsize 300 -annotate 0 'M&M' assets/icon.png
+          $IM -size 2732x2732 xc:'#0f766e' -gravity center -fill white -font DejaVu-Sans-Bold -pointsize 420 -annotate 0 'M&M' assets/splash.png
+          cp assets/splash.png assets/splash-dark.png
+          npx capacitor-assets generate --android
+
+      - name: Permissions, status bar and keyboard
+        working-directory: capapp
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          for P in RECORD_AUDIO CAMERA MODIFY_AUDIO_SETTINGS POST_NOTIFICATIONS VIBRATE; do
+            sed -i "/<\/manifest>/i\    <uses-permission android:name=\"android.permission.$P\" />" $M
+          done
+          sed -i '/<\/manifest>/i\    <uses-feature android:name="android.hardware.camera" android:required="false" />' $M
+          S=android/app/src/main/res/values/styles.xml
+          sed -i 's#</style>#    <item name="android:statusBarColor">\#0f766e</item>\n        <item name="android:navigationBarColor">\#0f766e</item>\n    </style>#' $S
+          sed -i 's#android:windowSoftInputMode="[^"]*"##; s#<activity#<activity android:windowSoftInputMode="adjustResize"#' $M
+          cat $M $S
+
+      - name: Sync and build debug APK
+        working-directory: capapp
+        run: |
+          npx cap sync android
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MM-Message-APK
+          path: capapp/android/app/build/outputs/apk/debug/app-debug.apk
