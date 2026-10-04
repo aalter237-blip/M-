@@ -71,7 +71,7 @@ jobs:
           for needle in ("const API = '';", "io({ auth: { token } })", "socket.on('message:new', m => {"):
               assert needle in s, 'missing: ' + needle
           s = s.replace("const API = '';", 'const API = ' + json.dumps(url) + ';')
-          s = s.replace("io({ auth: { token } })", "io(API, { auth: { token } })")
+          s = s.replace("io({ auth: { token } })", "io(API, { auth: { token }, transports: ['websocket'] })")
           s = s.replace("socket.on('message:new', m => {",
                         "socket.on('message:new', m => {\n    try { window.__mmNotify && window.__mmNotify(m); } catch (e) {}", 1)
           s = s.replace("pc.ontrack = e => { $('rv').srcObject = e.streams[0]; };",
@@ -132,6 +132,17 @@ jobs:
               show((u && u.name) || 'M&M', m.type === 'v' ? '🎤 رسالة صوتية' : (m.text || 'رسالة جديدة'), 'messages');
             };
 
+            function banner(t) {
+              let b = document.getElementById('mmBanner');
+              if (!t) { if (b) b.remove(); return; }
+              if (!b) {
+                b = document.createElement('div'); b.id = 'mmBanner';
+                b.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:99;background:#b91c1c;color:#fff;padding:6px 10px;font-size:13px;text-align:center';
+                document.body.appendChild(b);
+              }
+              b.textContent = t;
+            }
+
             let mode = null, timer = null;
             function setMode(m) {
               if (m === mode) return;
@@ -143,6 +154,12 @@ jobs:
               play(); timer = setInterval(play, m === 'in' ? 2200 : 4000);
             }
             setInterval(() => {
+              if (typeof socket !== 'undefined' && socket && !socket.__dbg) {
+                socket.__dbg = true;
+                socket.on('connect_error', e => banner('تعذر الاتصال بالخادم: ' + ((e && e.message) || '')));
+                socket.on('connect', () => banner(''));
+                socket.on('disconnect', r => banner('انقطع الاتصال: ' + r));
+              }
               const ring = document.getElementById('ring');
               const callEl = document.getElementById('call');
               const cn = document.getElementById('cn');
